@@ -1,0 +1,48 @@
+service:
+  name: csar-notify
+  port: 8085
+  health_port: 9085
+
+tls: {}
+
+database:
+  dsn: "${NOTIFY_DATABASE_URL}"
+
+rabbitmq:
+  url: "${RABBITMQ_URL}"
+  reconnect_delay: 5s
+
+redis:
+  url: "${REDIS_URL}"
+  prefix: "notify:"
+
+ingest:
+  buffer_size: 10000
+  publisher_workers: 4
+
+consumer:
+  queue:
+    name: notify.events
+    durable: true
+    prefetch: 200
+  dlq:
+    name: notify.events.dlq
+    durable: true
+  batch_size: 200
+  flush_interval: 2s
+  max_redeliveries: 3
+
+providers:
+  site:
+    enabled: true
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    api_base_url: "https://api.telegram.org"
+
+http:
+  allowed_client_cn: ""
+
+tracing:
+  endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+  sample_ratio: 1.0
