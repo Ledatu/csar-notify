@@ -227,6 +227,10 @@ func (s *Postgres) UpsertPreference(ctx context.Context, subject string, pref *d
 	if pref == nil {
 		return fmt.Errorf("preference is required")
 	}
+	topics := pref.Topics
+	if topics == nil {
+		topics = []string{}
+	}
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO notification_preferences (subject, channel, enabled, config, topics, updated_at)
 VALUES ($1::uuid, $2, $3, $4::jsonb, $5, now())
@@ -235,7 +239,7 @@ SET enabled = EXCLUDED.enabled,
     config = EXCLUDED.config,
     topics = EXCLUDED.topics,
     updated_at = now()
-`, subject, string(pref.Channel), pref.Enabled, string(rawJSON(pref.Config)), pref.Topics)
+`, subject, string(pref.Channel), pref.Enabled, string(rawJSON(pref.Config)), topics)
 	if err != nil {
 		return fmt.Errorf("upsert preference: %w", err)
 	}
