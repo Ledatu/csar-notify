@@ -94,14 +94,26 @@ func (p *Provider) Send(ctx context.Context, n *domain.Notification, recipientUU
 			continue
 		}
 		if resp != nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusGone {
+			bodyText := strings.TrimSpace(string(body))
+			if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
 				if delErr := p.store.DeletePushSubscription(ctx, recipientUUID, sub.Endpoint); delErr != nil {
 					p.logger.Warn("drop expired push subscription", "endpoint", truncateEndpoint(sub.Endpoint), "error", delErr)
 				}
-			} else if resp.StatusCode >= 400 {
-				p.logger.Warn("web push unexpected status", "status", resp.StatusCode, "endpoint", truncateEndpoint(sub.Endpoint))
+			}
+			if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+				statusErr := fmt.Errorf("web push unexpected status %d", resp.StatusCode)
+				if bodyText != "" {
+					statusErr = fmt.Errorf("%w: %s", statusErr, bodyText)
+				}
+				sendErr = errors.Join(sendErr, statusErr)
+				p.logger.Warn(
+					"web push unexpected status",
+					"status", resp.StatusCode,
+					"endpoint", truncateEndpoint(sub.Endpoint),
+					"body", bodyText,
+				)
 			}
 		}
 	}
