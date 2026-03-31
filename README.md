@@ -22,6 +22,9 @@ The main service listens on `service.port` (default `8085`) and registers:
 - `PATCH /notifications/{id}/dismiss`
 - `GET /notifications/preferences`
 - `PUT /notifications/preferences`
+- `GET /notifications/vapid-public-key`
+- `POST /notifications/push/subscriptions`
+- `DELETE /notifications/push/subscriptions`
 - `GET /notifications/stream`
 
 Inbox, preferences, and SSE endpoints expect gateway identity in request context via `gatewayctx`. If `http.allowed_client_cn` is set, the service also requires a peer client certificate whose common name matches that value.
@@ -52,8 +55,50 @@ Providers are opt-in by config:
 - `providers.telegram.enabled` enables Telegram delivery.
 - `providers.telegram.bot_token` keeps the legacy single-bot shape working.
 - `providers.telegram.bots` and `providers.telegram.default_bot` allow multiple named Telegram bots; recipient preference config can select one with `{"chat_id":"...","bot":"main-site"}`, and notification metadata can override with `telegram_bot`.
+- `providers.web_push.enabled` enables browser Web Push delivery backed by stored `PushSubscription` records.
+- `providers.web_push.subscriber` must be a VAPID contact string such as `mailto:ops@example.com`.
+- `providers.web_push.vapid_public_key` and `providers.web_push.vapid_private_key` must be generated as a matching pair and injected via environment variables in production.
 
 Tracing can be configured either by `tracing.endpoint` or the `-otlp-endpoint` flag. The `-otlp-insecure` flag enables an insecure OTLP gRPC connection.
+
+### Web Push setup
+
+For iPhone/Home Screen PWA notifications, enable the Web Push provider and configure VAPID keys.
+
+Generate a keypair once and store it in your secret manager:
+
+```bash
+cd csar-notify
+cat <<'EOF' > /tmp/generate-vapid.go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	webpush "github.com/SherClockHolmes/webpush-go"
+)
+
+func main() {
+	privateKey, publicKey, err := webpush.GenerateVAPIDKeys()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("NOTIFY_VAPID_PUBLIC_KEY=" + publicKey)
+	fmt.Println("NOTIFY_VAPID_PRIVATE_KEY=" + privateKey)
+}
+EOF
+go run /tmp/generate-vapid.go
+rm /tmp/generate-vapid.go
+```
+
+Then set:
+
+- `NOTIFY_WEB_PUSH_SUBSCRIBER=mailto:ops@example.com`
+- `NOTIFY_VAPID_PUBLIC_KEY=...`
+- `NOTIFY_VAPID_PRIVATE_KEY=...`
+
+In production config, switch `providers.web_push.enabled` to `true` after those secrets are present.
 
 ## Local Validation
 

@@ -79,6 +79,7 @@ type ProvidersConfig struct {
 	Site     SiteProviderConfig     `yaml:"site"`
 	Telegram TelegramProviderConfig `yaml:"telegram"`
 	Email    EmailProviderConfig    `yaml:"email"`
+	WebPush  WebPushProviderConfig  `yaml:"web_push"`
 }
 
 type SiteProviderConfig struct {
@@ -106,6 +107,14 @@ type TelegramBotConfig struct {
 
 type EmailProviderConfig struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+// WebPushProviderConfig configures encrypted Web Push (VAPID) delivery to browsers.
+type WebPushProviderConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	Subscriber      string `yaml:"subscriber"` // mailto: contact for VAPID JWT "sub" claim
+	VAPIDPublicKey  string `yaml:"vapid_public_key"`
+	VAPIDPrivateKey string `yaml:"vapid_private_key"`
 }
 
 type HTTPExtraConfig struct {
@@ -217,6 +226,14 @@ func (c *Config) validate() error {
 	if c.Providers.Telegram.Enabled {
 		if _, _, err := c.Providers.Telegram.EffectiveBots(); err != nil {
 			return err
+		}
+	}
+	if c.Providers.WebPush.Enabled {
+		if strings.TrimSpace(c.Providers.WebPush.Subscriber) == "" {
+			return fmt.Errorf("providers.web_push.subscriber is required when web_push is enabled (e.g. mailto:ops@example.com)")
+		}
+		if strings.TrimSpace(c.Providers.WebPush.VAPIDPublicKey) == "" || strings.TrimSpace(c.Providers.WebPush.VAPIDPrivateKey) == "" {
+			return fmt.Errorf("providers.web_push.vapid_public_key and vapid_private_key are required when web_push is enabled")
 		}
 	}
 	return nil

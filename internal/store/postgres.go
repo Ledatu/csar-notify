@@ -73,6 +73,25 @@ CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_topic
     ON topic_subscriptions (topic, subject);
 `,
 	},
+	{
+		Name: "003_push_subscriptions",
+		Up: `
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subject     UUID NOT NULL,
+    endpoint    TEXT NOT NULL,
+    p256dh_key  TEXT NOT NULL,
+    auth_key    TEXT NOT NULL,
+    user_agent  TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (subject, endpoint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_subject
+    ON push_subscriptions (subject);
+`,
+	},
 }
 
 type Postgres struct {
@@ -309,13 +328,20 @@ func DefaultPreferences(subject string) []domain.Preference {
 			Enabled: true,
 			Config:  json.RawMessage(`{}`),
 		},
+		{
+			Subject: subject,
+			Channel: domain.ChannelWebPush,
+			Enabled: false,
+			Config:  json.RawMessage(`{}`),
+		},
 	}
 }
 
 func MergeDefaults(subject string, prefs []domain.Preference) []domain.Preference {
 	out := DefaultPreferences(subject)
 	index := map[domain.Channel]int{
-		domain.ChannelSite: 0,
+		domain.ChannelSite:    0,
+		domain.ChannelWebPush: 1,
 	}
 	for _, pref := range prefs {
 		if idx, ok := index[pref.Channel]; ok {
@@ -393,4 +419,59 @@ func cloneMetadata(data map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// PushSubscriptionRow is a browser Web Push subscription for a subject.
+type PushSubscriptionRow struct {
+	Endpoint  string
+	P256dhKey string
+	AuthKey   string
+}
+
+func (s *Postgres) UpsertPushSubscription(ctx context.Context, subject, endpoint, p256dh, auth, userAgent string) error {
+	_, err := s.pool.Exec(ctx, `
+INSERT INTO push_subscriptions (subject, endpoint, p256dh_key, auth_key, user_agent)
+VALUES ($1::uuid, $2, $3, $4, NULLIF($5, ''))
+ON CONFLICT (subject, endpoint) DO UPDATE SET
+  p256dh_key = EXCLUDED.p256dh_key,
+  auth_key = EXCLUDED.auth_key,
+  user_agent = EXCLUDED.user_agent,
+  updated_at = now()
+`, subject, endpoint, p256dh, auth, userAgent)
+	if err != nil {
+		return fmt.Errorf("upsert push subscription: %w", err)
+	}
+	return nil
+}
+
+func (s *Postgres) DeletePushSubscription(ctx context.Context, subject, endpoint string) error {
+	_, err := s.pool.Exec(ctx, `
+DELETE FROM push_subscriptions WHERE subject = $1::uuid AND endpoint = $2
+`, subject, endpoint)
+	if err != nil {
+		return fmt.Errorf("delete push subscription: %w", err)
+	}
+	return nil
+}
+
+func (s *Postgres) ListPushSubscriptionsForSubject(ctx context.Context, subject string) ([]PushSubscriptionRow, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT endpoint, p256dh_key, auth_key
+FROM push_subscriptions
+WHERE subject = $1::uuid
+`, subject)
+	if err != nil {
+		return nil, fmt.Errorf("list push subscriptions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []PushSubscriptionRow
+	for rows.Next() {
+		var r PushSubscriptionRow
+		if err := rows.Scan(&r.Endpoint, &r.P256dhKey, &r.AuthKey); err != nil {
+			return nil, fmt.Errorf("scan push subscription: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

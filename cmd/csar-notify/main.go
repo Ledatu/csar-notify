@@ -31,9 +31,12 @@ import (
 	"github.com/ledatu/csar-notify/internal/provider"
 	siteprovider "github.com/ledatu/csar-notify/internal/provider/site"
 	telegramprovider "github.com/ledatu/csar-notify/internal/provider/telegram"
+	webpushprovider "github.com/ledatu/csar-notify/internal/provider/webpush"
+	"github.com/ledatu/csar-notify/internal/pushsubscription"
 	"github.com/ledatu/csar-notify/internal/rmq"
 	"github.com/ledatu/csar-notify/internal/sse"
 	"github.com/ledatu/csar-notify/internal/store"
+	"github.com/ledatu/csar-notify/internal/vapid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -169,6 +172,8 @@ func run(sf *configload.SourceFlags, otlpEndpoint string, otlpInsecure bool, log
 	mux.Handle("POST /ingest", ingest.NewHTTPHandler(buf, logger, m.IngestTotal, m.IngestDuration))
 	inbox.New(pgStore).Register(mux)
 	preferences.New(pgStore).Register(mux)
+	vapid.New(cfg.Providers.WebPush.VAPIDPublicKey).Register(mux)
+	pushsubscription.New(pgStore).Register(mux)
 	mux.Handle("GET /notifications/stream", http.HandlerFunc(hub.ServeHTTP))
 
 	httpStack := httpmiddleware.Chain(
@@ -274,7 +279,7 @@ func run(sf *configload.SourceFlags, otlpEndpoint string, otlpInsecure bool, log
 }
 
 func buildProviders(cfg *config.Config, pgStore *store.Postgres, redisClient *redis.Client, logger *slog.Logger) (*provider.Registry, error) {
-	items := make([]provider.Provider, 0, 2)
+	items := make([]provider.Provider, 0, 4)
 	if cfg.Providers.Site.Enabled {
 		prov, err := siteprovider.New(pgStore, redisClient, cfg.Providers.Site, cfg.Redis.Prefix, logger)
 		if err != nil {
@@ -288,6 +293,9 @@ func buildProviders(cfg *config.Config, pgStore *store.Postgres, redisClient *re
 			return nil, fmt.Errorf("telegram provider: %w", err)
 		}
 		items = append(items, prov)
+	}
+	if cfg.Providers.WebPush.Enabled {
+		items = append(items, webpushprovider.New(pgStore, cfg.Providers.WebPush, logger))
 	}
 	return provider.NewRegistry(items...), nil
 }

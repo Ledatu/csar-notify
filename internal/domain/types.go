@@ -15,6 +15,7 @@ const (
 	ChannelSite     Channel = "site"
 	ChannelTelegram Channel = "telegram"
 	ChannelEmail    Channel = "email"
+	ChannelWebPush  Channel = "web_push"
 )
 
 type Priority string
@@ -119,7 +120,7 @@ func ValidateNotification(n *Notification) error {
 
 func (c Channel) Valid() bool {
 	switch c {
-	case ChannelSite, ChannelTelegram, ChannelEmail:
+	case ChannelSite, ChannelTelegram, ChannelEmail, ChannelWebPush:
 		return true
 	default:
 		return false
