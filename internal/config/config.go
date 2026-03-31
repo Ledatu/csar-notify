@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/ledatu/csar-core/configutil"
@@ -77,16 +78,34 @@ type ConsumerDLQConfig struct {
 type ProvidersConfig struct {
 	Site     SiteProviderConfig     `yaml:"site"`
 	Telegram TelegramProviderConfig `yaml:"telegram"`
+	Email    EmailProviderConfig    `yaml:"email"`
 }
 
 type SiteProviderConfig struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled       bool                        `yaml:"enabled"`
+	DefaultTarget string                      `yaml:"default_target"`
+	Targets       map[string]SiteTargetConfig `yaml:"targets"`
+}
+
+type SiteTargetConfig struct {
+	RedisPrefix string `yaml:"redis_prefix"`
 }
 
 type TelegramProviderConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	BotToken   string `yaml:"bot_token"`
+	Enabled    bool                         `yaml:"enabled"`
+	DefaultBot string                       `yaml:"default_bot"`
+	BotToken   string                       `yaml:"bot_token"`
+	APIBaseURL string                       `yaml:"api_base_url"`
+	Bots       map[string]TelegramBotConfig `yaml:"bots"`
+}
+
+type TelegramBotConfig struct {
+	Token      string `yaml:"token"`
 	APIBaseURL string `yaml:"api_base_url"`
+}
+
+type EmailProviderConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type HTTPExtraConfig struct {
@@ -151,6 +170,12 @@ func defaults(cfg *Config) {
 	if cfg.Providers.Telegram.APIBaseURL == "" {
 		cfg.Providers.Telegram.APIBaseURL = "https://api.telegram.org"
 	}
+	for name, bot := range cfg.Providers.Telegram.Bots {
+		if strings.TrimSpace(bot.APIBaseURL) == "" {
+			bot.APIBaseURL = cfg.Providers.Telegram.APIBaseURL
+			cfg.Providers.Telegram.Bots[name] = bot
+		}
+	}
 	if cfg.Tracing.SampleRatio == 0 {
 		cfg.Tracing.SampleRatio = 1.0
 	}
@@ -181,8 +206,18 @@ func (c *Config) validate() error {
 	if c.Consumer.DLQ.Name == "" {
 		return fmt.Errorf("consumer.dlq.name is required")
 	}
-	if c.Providers.Telegram.Enabled && c.Providers.Telegram.BotToken == "" {
-		return fmt.Errorf("providers.telegram.bot_token is required when telegram is enabled")
+	if c.Providers.Email.Enabled {
+		return fmt.Errorf("providers.email is not implemented yet")
+	}
+	if c.Providers.Site.Enabled {
+		if _, _, err := c.Providers.Site.EffectiveTargets(c.Redis.Prefix); err != nil {
+			return err
+		}
+	}
+	if c.Providers.Telegram.Enabled {
+		if _, _, err := c.Providers.Telegram.EffectiveBots(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -202,4 +237,108 @@ func (t TLSSection) ToTLSx() tlsx.ServerConfig {
 		ClientCAFile: t.ClientCAFile,
 		MinVersion:   t.MinVersion,
 	}
+}
+
+func (s SiteProviderConfig) EffectiveTargets(basePrefix string) (map[string]SiteTargetConfig, string, error) {
+	targets := make(map[string]SiteTargetConfig, len(s.Targets))
+	for rawName, rawTarget := range s.Targets {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			return nil, "", fmt.Errorf("providers.site.targets keys must not be empty")
+		}
+		target := SiteTargetConfig{
+			RedisPrefix: strings.TrimSpace(rawTarget.RedisPrefix),
+		}
+		targets[name] = target
+	}
+
+	defaultTarget := strings.TrimSpace(s.DefaultTarget)
+	if len(targets) == 0 {
+		if defaultTarget == "" {
+			defaultTarget = "default"
+		}
+		targets[defaultTarget] = SiteTargetConfig{RedisPrefix: basePrefix}
+		return targets, defaultTarget, nil
+	}
+
+	if defaultTarget == "" {
+		if len(targets) != 1 {
+			return nil, "", fmt.Errorf("providers.site.default_target is required when multiple site targets are configured")
+		}
+		for name := range targets {
+			defaultTarget = name
+		}
+	}
+	if _, ok := targets[defaultTarget]; !ok {
+		return nil, "", fmt.Errorf("providers.site.default_target %q is not defined under providers.site.targets", defaultTarget)
+	}
+
+	for name, target := range targets {
+		if target.RedisPrefix == "" {
+			if len(targets) == 1 {
+				target.RedisPrefix = basePrefix
+			} else {
+				target.RedisPrefix = basePrefix + name + ":"
+			}
+			targets[name] = target
+		}
+	}
+
+	return targets, defaultTarget, nil
+}
+
+func (t TelegramProviderConfig) EffectiveBots() (map[string]TelegramBotConfig, string, error) {
+	const legacyBotName = "default"
+
+	bots := make(map[string]TelegramBotConfig, len(t.Bots)+1)
+	for rawName, rawBot := range t.Bots {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			return nil, "", fmt.Errorf("providers.telegram.bots keys must not be empty")
+		}
+		bot := TelegramBotConfig{
+			Token:      strings.TrimSpace(rawBot.Token),
+			APIBaseURL: strings.TrimSpace(rawBot.APIBaseURL),
+		}
+		if bot.Token == "" {
+			return nil, "", fmt.Errorf("providers.telegram.bots.%s.token is required", name)
+		}
+		if bot.APIBaseURL == "" {
+			bot.APIBaseURL = "https://api.telegram.org"
+		}
+		bots[name] = bot
+	}
+
+	if token := strings.TrimSpace(t.BotToken); token != "" {
+		apiBaseURL := strings.TrimSpace(t.APIBaseURL)
+		if apiBaseURL == "" {
+			apiBaseURL = "https://api.telegram.org"
+		}
+		bots[legacyBotName] = TelegramBotConfig{
+			Token:      token,
+			APIBaseURL: apiBaseURL,
+		}
+	}
+
+	if len(bots) == 0 {
+		return nil, "", fmt.Errorf("providers.telegram requires bot_token or bots when telegram is enabled")
+	}
+
+	defaultBot := strings.TrimSpace(t.DefaultBot)
+	if defaultBot == "" {
+		if _, ok := bots[legacyBotName]; ok {
+			defaultBot = legacyBotName
+		} else if len(bots) == 1 {
+			for name := range bots {
+				defaultBot = name
+			}
+		} else {
+			return nil, "", fmt.Errorf("providers.telegram.default_bot is required when multiple bots are configured")
+		}
+	}
+	if _, ok := bots[defaultBot]; !ok {
+		return nil, "", fmt.Errorf("providers.telegram.default_bot %q is not defined", defaultBot)
+	}
+
+	return bots, defaultBot, nil
 }

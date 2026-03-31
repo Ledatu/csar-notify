@@ -5,11 +5,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	csarerrors "github.com/ledatu/csar-core/errors"
-	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/httpx"
 	"github.com/ledatu/csar-notify/internal/domain"
+	"github.com/ledatu/csar-notify/internal/httpauth"
 	"github.com/ledatu/csar-notify/internal/store"
 )
 
@@ -32,7 +31,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	subject, err := subjectFromRequest(r)
+	subject, err := httpauth.SubjectFromRequest(r)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -48,7 +47,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
-	subject, err := subjectFromRequest(r)
+	subject, err := httpauth.SubjectFromRequest(r)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -101,15 +100,4 @@ func normalizeTopics(in []string) []string {
 		out = append(out, topic)
 	}
 	return out
-}
-
-func subjectFromRequest(r *http.Request) (string, error) {
-	id, ok := gatewayctx.FromContext(r.Context())
-	if !ok || id.Subject == "" {
-		return "", csarerrors.Unauthorized("missing gateway subject")
-	}
-	if _, err := uuid.Parse(id.Subject); err != nil {
-		return "", csarerrors.Unauthorized("gateway subject must be a valid UUID")
-	}
-	return id.Subject, nil
 }

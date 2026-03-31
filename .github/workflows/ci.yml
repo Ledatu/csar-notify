@@ -11,68 +11,59 @@ permissions:
 
 jobs:
   lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           path: csar-notify
-
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/csar-core
-          path: csar-core
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
           cache-dependency-path: csar-notify/go.sum
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          working-directory: csar-notify
-          args: --config .golangci.yml --timeout 5m
+      - name: Install golangci-lint v2
+        working-directory: csar-notify
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+      - name: Run golangci-lint
+        working-directory: csar-notify
+        run: golangci-lint run ./...
 
   test:
+    name: Test
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ["1.24", "1.25"]
     steps:
       - uses: actions/checkout@v4
         with:
           path: csar-notify
 
-      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          repository: ${{ github.repository_owner }}/csar-core
-          path: csar-core
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go-version }}
+          go-version: "1.25"
           cache-dependency-path: csar-notify/go.sum
 
       - name: Verify dependencies
         working-directory: csar-notify
         run: go mod verify
 
+      - name: Run go vet
+        working-directory: csar-notify
+        run: go vet ./...
+
       - name: Run tests
         working-directory: csar-notify
         run: go test -v -race -count=1 ./...
 
   build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           path: csar-notify
-
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/csar-core
-          path: csar-core
 
       - uses: actions/setup-go@v5
         with:

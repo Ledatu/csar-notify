@@ -8,7 +8,7 @@
 - Queueing: buffered notifications are published to the RabbitMQ queue from `consumer.queue.name`; failed deliveries can be routed to `consumer.dlq.name`.
 - Delivery: the consumer reads batches from RabbitMQ and dispatches through the enabled provider registry.
 - Persistence: Postgres stores inbox items and notification preferences.
-- Realtime: Redis pub/sub is used to fan out per-subject updates to `GET /notifications/stream`.
+- Realtime: Redis pub/sub is used to fan out per-subject updates to `GET /notifications/stream`, with optional named site targets when one notify instance serves multiple frontends.
 - Health and metrics: a separate plain HTTP sidecar listens on `service.health_port` and exposes `/health`, `/readiness`, and `/metrics`.
 
 ## HTTP Surface
@@ -25,6 +25,8 @@ The main service listens on `service.port` (default `8085`) and registers:
 - `GET /notifications/stream`
 
 Inbox, preferences, and SSE endpoints expect gateway identity in request context via `gatewayctx`. If `http.allowed_client_cn` is set, the service also requires a peer client certificate whose common name matches that value.
+
+When multiple site targets are configured, clients can select a stream with `GET /notifications/stream?target=<name>`. Site target selection for delivery is driven by notification metadata (`site_target`) or the site preference config (`{"target":"<name>"}`).
 
 ## Configuration Notes
 
@@ -46,7 +48,10 @@ Key defaults from the implementation:
 Providers are opt-in by config:
 
 - `providers.site.enabled` enables in-site delivery.
-- `providers.telegram.enabled` enables Telegram delivery and requires `providers.telegram.bot_token`.
+- `providers.site.targets` and `providers.site.default_target` let one instance fan out realtime events for multiple named sites.
+- `providers.telegram.enabled` enables Telegram delivery.
+- `providers.telegram.bot_token` keeps the legacy single-bot shape working.
+- `providers.telegram.bots` and `providers.telegram.default_bot` allow multiple named Telegram bots; recipient preference config can select one with `{"chat_id":"...","bot":"main-site"}`, and notification metadata can override with `telegram_bot`.
 
 Tracing can be configured either by `tracing.endpoint` or the `-otlp-endpoint` flag. The `-otlp-insecure` flag enables an insecure OTLP gRPC connection.
 

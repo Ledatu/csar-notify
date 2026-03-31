@@ -135,14 +135,26 @@ func run(sf *configload.SourceFlags, otlpEndpoint string, otlpInsecure bool, log
 	defer buf.Close()
 	bufDepth = func() float64 { return float64(buf.Depth()) }
 
-	hub := sse.New(redisClient, cfg.Redis.Prefix, logger, m.SSEConnections)
+	siteTargets, siteDefaultTarget, err := cfg.Providers.Site.EffectiveTargets(cfg.Redis.Prefix)
+	if err != nil {
+		return fmt.Errorf("resolve site provider targets: %w", err)
+	}
+	hubPrefixes := make(map[string]string, len(siteTargets))
+	for name, target := range siteTargets {
+		hubPrefixes[name] = target.RedisPrefix
+	}
+
+	hub := sse.New(redisClient, hubPrefixes, siteDefaultTarget, logger, m.SSEConnections)
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
 	if err := hub.Start(appCtx); err != nil {
 		return fmt.Errorf("start sse hub: %w", err)
 	}
 
-	providers := buildProviders(cfg, pgStore, redisClient, logger)
+	providers, err := buildProviders(cfg, pgStore, redisClient, logger)
+	if err != nil {
+		return fmt.Errorf("build providers: %w", err)
+	}
 	defer func() { _ = providers.Close() }()
 
 	dispatcher := dispatch.New(pgStore, providers, logger, m.ProviderSends, m.ProviderErrors)
@@ -261,15 +273,23 @@ func run(sf *configload.SourceFlags, otlpEndpoint string, otlpInsecure bool, log
 	return nil
 }
 
-func buildProviders(cfg *config.Config, pgStore *store.Postgres, redisClient *redis.Client, logger *slog.Logger) *provider.Registry {
+func buildProviders(cfg *config.Config, pgStore *store.Postgres, redisClient *redis.Client, logger *slog.Logger) (*provider.Registry, error) {
 	items := make([]provider.Provider, 0, 2)
 	if cfg.Providers.Site.Enabled {
-		items = append(items, siteprovider.New(pgStore, redisClient, cfg.Redis.Prefix, logger))
+		prov, err := siteprovider.New(pgStore, redisClient, cfg.Providers.Site, cfg.Redis.Prefix, logger)
+		if err != nil {
+			return nil, fmt.Errorf("site provider: %w", err)
+		}
+		items = append(items, prov)
 	}
 	if cfg.Providers.Telegram.Enabled {
-		items = append(items, telegramprovider.New(nil, cfg.Providers.Telegram.BotToken, cfg.Providers.Telegram.APIBaseURL, logger))
+		prov, err := telegramprovider.New(nil, cfg.Providers.Telegram, logger)
+		if err != nil {
+			return nil, fmt.Errorf("telegram provider: %w", err)
+		}
+		items = append(items, prov)
 	}
-	return provider.NewRegistry(items...)
+	return provider.NewRegistry(items...), nil
 }
 
 func buildTrustFunc(cfg *config.Config) gatewayctx.TrustFunc {

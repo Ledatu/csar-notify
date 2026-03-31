@@ -10,33 +10,50 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ledatu/csar-notify/internal/config"
 	"github.com/ledatu/csar-notify/internal/domain"
 )
 
+type botConfig struct {
+	token      string
+	apiBaseURL string
+}
+
 type Provider struct {
 	client     *http.Client
-	botToken   string
-	apiBaseURL string
+	bots       map[string]botConfig
+	defaultBot string
 	logger     *slog.Logger
 }
 
-func New(client *http.Client, botToken string, apiBaseURL string, logger *slog.Logger) *Provider {
+func New(client *http.Client, telegramCfg config.TelegramProviderConfig, logger *slog.Logger) (*Provider, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
-	if apiBaseURL == "" {
-		apiBaseURL = "https://api.telegram.org"
+	bots, defaultBot, err := telegramCfg.EffectiveBots()
+	if err != nil {
+		return nil, err
+	}
+	resolved := make(map[string]botConfig, len(bots))
+	for name, bot := range bots {
+		apiBaseURL := strings.TrimRight(strings.TrimSpace(bot.APIBaseURL), "/")
+		if apiBaseURL == "" {
+			apiBaseURL = "https://api.telegram.org"
+		}
+		resolved[name] = botConfig{
+			token:      bot.Token,
+			apiBaseURL: apiBaseURL,
+		}
 	}
 	return &Provider{
 		client:     client,
-		botToken:   botToken,
-		apiBaseURL: apiBaseURL,
+		bots:       resolved,
+		defaultBot: defaultBot,
 		logger:     logger.With("component", "notify_provider_telegram"),
-	}
+	}, nil
 }
 
 func (p *Provider) Name() string {
@@ -48,12 +65,9 @@ func (p *Provider) Channel() domain.Channel {
 }
 
 func (p *Provider) Send(ctx context.Context, n *domain.Notification, recipientUUID string, prefConfig json.RawMessage) error {
-	if strings.TrimSpace(p.botToken) == "" {
-		return fmt.Errorf("telegram bot token is not configured")
-	}
-
 	var pref struct {
 		ChatID string `json:"chat_id"`
+		Bot    string `json:"bot"`
 	}
 	if len(prefConfig) > 0 {
 		if err := json.Unmarshal(prefConfig, &pref); err != nil {
@@ -62,6 +76,17 @@ func (p *Provider) Send(ctx context.Context, n *domain.Notification, recipientUU
 	}
 	if strings.TrimSpace(pref.ChatID) == "" {
 		return fmt.Errorf("telegram chat_id is missing for recipient %s", recipientUUID)
+	}
+	botName := strings.TrimSpace(pref.Bot)
+	if botName == "" && n != nil && n.Metadata != nil {
+		botName = strings.TrimSpace(n.Metadata["telegram_bot"])
+	}
+	if botName == "" {
+		botName = p.defaultBot
+	}
+	bot, ok := p.bots[botName]
+	if !ok {
+		return fmt.Errorf("telegram bot %q is not configured", botName)
 	}
 
 	body, err := json.Marshal(map[string]string{
@@ -72,7 +97,7 @@ func (p *Provider) Send(ctx context.Context, n *domain.Notification, recipientUU
 		return fmt.Errorf("marshal telegram message: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.apiBaseURL+"/bot"+p.botToken+"/sendMessage", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, bot.apiBaseURL+"/bot"+bot.token+"/sendMessage", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build telegram request: %w", err)
 	}

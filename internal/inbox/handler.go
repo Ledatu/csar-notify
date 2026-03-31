@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	csarerrors "github.com/ledatu/csar-core/errors"
-	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/httpx"
 	"github.com/ledatu/csar-notify/internal/domain"
+	"github.com/ledatu/csar-notify/internal/httpauth"
 )
 
 type store interface {
@@ -36,7 +36,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	subject, err := subjectFromRequest(r)
+	subject, err := httpauth.SubjectFromRequest(r)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -60,7 +60,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) count(w http.ResponseWriter, r *http.Request) {
-	subject, err := subjectFromRequest(r)
+	subject, err := httpauth.SubjectFromRequest(r)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -86,7 +86,7 @@ func (h *Handler) dismiss(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) updateState(w http.ResponseWriter, r *http.Request, fn func(context.Context, string, string) error) {
-	subject, err := subjectFromRequest(r)
+	subject, err := httpauth.SubjectFromRequest(r)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -125,15 +125,4 @@ func pageParams(r *http.Request) (int, int, error) {
 		offset = v
 	}
 	return limit, offset, nil
-}
-
-func subjectFromRequest(r *http.Request) (string, error) {
-	id, ok := gatewayctx.FromContext(r.Context())
-	if !ok || id.Subject == "" {
-		return "", csarerrors.Unauthorized("missing gateway subject")
-	}
-	if _, err := uuid.Parse(id.Subject); err != nil {
-		return "", csarerrors.Unauthorized("gateway subject must be a valid UUID")
-	}
-	return id.Subject, nil
 }

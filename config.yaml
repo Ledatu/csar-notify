@@ -35,10 +35,24 @@ consumer:
 providers:
   site:
     enabled: true
+    default_target: "admin"
+    targets:
+      admin:
+        redis_prefix: "notify:"
+      main:
+        redis_prefix: "notify:main:"
   telegram:
     enabled: true
-    bot_token: "${TELEGRAM_BOT_TOKEN}"
-    api_base_url: "https://api.telegram.org"
+    default_bot: "support"
+    bots:
+      support:
+        token: "${TELEGRAM_BOT_TOKEN}"
+        api_base_url: "https://api.telegram.org"
+      main-site:
+        token: "${MAIN_SITE_TELEGRAM_BOT_TOKEN}"
+        api_base_url: "https://api.telegram.org"
+  email:
+    enabled: false
 
 http:
   allowed_client_cn: ""
