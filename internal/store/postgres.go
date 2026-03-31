@@ -229,13 +229,13 @@ func (s *Postgres) UpsertPreference(ctx context.Context, subject string, pref *d
 	}
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO notification_preferences (subject, channel, enabled, config, topics, updated_at)
-VALUES ($1::uuid, $2, $3, $4, $5, now())
+VALUES ($1::uuid, $2, $3, $4::jsonb, $5, now())
 ON CONFLICT (subject, channel) DO UPDATE
 SET enabled = EXCLUDED.enabled,
     config = EXCLUDED.config,
     topics = EXCLUDED.topics,
     updated_at = now()
-`, subject, string(pref.Channel), pref.Enabled, rawJSON(pref.Config), pref.Topics)
+`, subject, string(pref.Channel), pref.Enabled, string(rawJSON(pref.Config)), pref.Topics)
 	if err != nil {
 		return fmt.Errorf("upsert preference: %w", err)
 	}
