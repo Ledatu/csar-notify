@@ -64,11 +64,18 @@ func (p *Provider) Send(ctx context.Context, n *domain.Notification, recipientUU
 	if n.ID != "" {
 		tag = "notify-" + n.ID
 	}
-	payload, err := json.Marshal(map[string]string{
-		"title": n.Title,
-		"body":  n.Body,
-		"link":  n.Link,
-		"tag":   tag,
+	payload, err := json.Marshal(struct {
+		Title    string            `json:"title"`
+		Body     string            `json:"body"`
+		Link     string            `json:"link"`
+		Tag      string            `json:"tag"`
+		Metadata map[string]string `json:"metadata,omitempty"`
+	}{
+		Title:    n.Title,
+		Body:     n.Body,
+		Link:     n.Link,
+		Tag:      tag,
+		Metadata: n.Metadata,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal web push payload: %w", err)
