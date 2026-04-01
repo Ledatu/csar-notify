@@ -10,6 +10,7 @@ import (
 	"github.com/ledatu/csar-notify/internal/config"
 	"github.com/ledatu/csar-notify/internal/dispatch"
 	"github.com/ledatu/csar-notify/internal/domain"
+	"github.com/ledatu/csar-notify/internal/provider"
 	"github.com/ledatu/csar-notify/internal/rmq"
 	"github.com/prometheus/client_golang/prometheus"
 	amqp091 "github.com/rabbitmq/amqp091-go"
@@ -104,36 +105,47 @@ func runSession(ctx context.Context, cm *rmq.ConnectionManager, dispatcher *disp
 		}
 
 		start := time.Now()
-		dispatchCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		err = dispatchBatch(dispatchCtx, dispatcher, notifications)
-		cancel()
+		for i := range notifications {
+			dispatchCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			err = dispatcher.Dispatch(dispatchCtx, &notifications[i])
+			cancel()
+			if err != nil {
+				if shouldAckAfterDispatchError(err) {
+					logger.Warn(
+						"acknowledging notification after permanent web push failure",
+						"error", err,
+						"notification_id", notifications[i].ID,
+						"topic", notifications[i].Topic,
+					)
+					if m != nil {
+						m.ConsumerErrors.WithLabelValues("web_push_permanent").Inc()
+					}
+					if ackErr := good[i].Ack(false); ackErr != nil {
+						logger.Error("delivery ack failed", "error", ackErr, "delivery_tag", good[i].DeliveryTag)
+					}
+					continue
+				}
+
+				logger.Error("dispatch notification failed", "error", err, "notification_id", notifications[i].ID, "topic", notifications[i].Topic)
+				if m != nil {
+					m.ConsumerErrors.WithLabelValues("dispatch_error").Inc()
+				}
+				_ = good[i].Nack(false, true)
+				continue
+			}
+
+			if ackErr := good[i].Ack(false); ackErr != nil {
+				logger.Error("delivery ack failed", "error", ackErr, "delivery_tag", good[i].DeliveryTag)
+			}
+		}
 		if m != nil {
 			m.BatchFlushSeconds.Observe(time.Since(start).Seconds())
-		}
-		if err != nil {
-			logger.Error("dispatch batch failed", "error", err, "batch_len", len(notifications))
-			if m != nil {
-				m.ConsumerErrors.WithLabelValues("dispatch_error").Inc()
-			}
-			for i := range good {
-				_ = good[i].Nack(false, true)
-			}
-			continue
-		}
-
-		if err := good[len(good)-1].Ack(true); err != nil {
-			logger.Error("batch ack failed", "error", err, "batch_len", len(good))
 		}
 	}
 }
 
-func dispatchBatch(ctx context.Context, dispatcher *dispatch.Dispatcher, notifications []domain.Notification) error {
-	for i := range notifications {
-		if err := dispatcher.Dispatch(ctx, &notifications[i]); err != nil {
-			return err
-		}
-	}
-	return nil
+func shouldAckAfterDispatchError(err error) bool {
+	return provider.IsPermanentChannelOnly(err, domain.ChannelWebPush)
 }
 
 func decodeBatch(batch []amqp091.Delivery, maxRedeliver int, logger *slog.Logger, m *ConsumerMetrics) ([]domain.Notification, []amqp091.Delivery, []amqp091.Delivery) {

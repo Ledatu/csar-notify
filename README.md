@@ -56,7 +56,7 @@ Providers are opt-in by config:
 - `providers.telegram.bot_token` keeps the legacy single-bot shape working.
 - `providers.telegram.bots` and `providers.telegram.default_bot` allow multiple named Telegram bots; recipient preference config can select one with `{"chat_id":"...","bot":"main-site"}`, and notification metadata can override with `telegram_bot`.
 - `providers.web_push.enabled` enables browser Web Push delivery backed by stored `PushSubscription` records.
-- `providers.web_push.subscriber` must be a VAPID contact string such as `mailto:ops@example.com`.
+- `providers.web_push.subscriber` must be a VAPID contact string. Use either a bare e-mail such as `ops@example.com` or an `https://...` contact URL.
 - `providers.web_push.vapid_public_key` and `providers.web_push.vapid_private_key` must be generated as a matching pair and injected via environment variables in production.
 
 Tracing can be configured either by `tracing.endpoint` or the `-otlp-endpoint` flag. The `-otlp-insecure` flag enables an insecure OTLP gRPC connection.
@@ -94,11 +94,13 @@ rm /tmp/generate-vapid.go
 
 Then set:
 
-- `NOTIFY_WEB_PUSH_SUBSCRIBER=mailto:ops@example.com`
+- `NOTIFY_WEB_PUSH_SUBSCRIBER=ops@example.com`
 - `NOTIFY_VAPID_PUBLIC_KEY=...`
 - `NOTIFY_VAPID_PRIVATE_KEY=...`
 
 In production config, switch `providers.web_push.enabled` to `true` after those secrets are present.
+
+Keep one VAPID keypair stable in production. If you rotate the pair, existing browser subscriptions must be recreated by re-enabling push on each device.
 
 ## Local Validation
 
