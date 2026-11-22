@@ -1,12 +1,10 @@
 package webpush
 
 import (
-	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"encoding/base64"
 	"fmt"
-	"math/big"
 	"net/http"
 	"net/url"
 	"strings"
@@ -174,27 +172,5 @@ func decodeVAPIDKey(key string) ([]byte, error) {
 }
 
 func vapidPrivateKeyToECDSA(privateKey []byte) (*ecdsa.PrivateKey, error) {
-	p256 := ecdh.P256()
-	ecdhPrivateKey, err := p256.NewPrivateKey(privateKey)
-	if err != nil {
-		return nil, err
-	}
-
-	curve := elliptic.P256()
-	publicKey := ecdhPrivateKey.PublicKey().Bytes()
-	coordSize := curve.Params().BitSize / 8
-	if len(publicKey) != 1+coordSize*2 || publicKey[0] != 4 {
-		return nil, fmt.Errorf("decode VAPID public key")
-	}
-	px := new(big.Int).SetBytes(publicKey[1 : 1+coordSize])
-	py := new(big.Int).SetBytes(publicKey[1+coordSize:])
-	d := new(big.Int).SetBytes(privateKey)
-	return &ecdsa.PrivateKey{
-		PublicKey: ecdsa.PublicKey{
-			Curve: curve,
-			X:     px,
-			Y:     py,
-		},
-		D: d,
-	}, nil
+	return ecdsa.ParseRawPrivateKey(elliptic.P256(), privateKey)
 }
