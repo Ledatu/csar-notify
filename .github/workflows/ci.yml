@@ -20,7 +20,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.11"
           cache-dependency-path: csar-notify/go.sum
 
       - name: Install golangci-lint v2
@@ -42,7 +42,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.11"
           cache-dependency-path: csar-notify/go.sum
 
       - name: Verify dependencies
@@ -67,7 +67,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.11"
           cache-dependency-path: csar-notify/go.sum
 
       - name: Build binary
